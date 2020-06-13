@@ -47,9 +47,18 @@ class InputHandler
 public:
     InputHandler(CliSession& _session, InputDevice& kb) :
         session(_session),
-        terminal(session.OutStream())
+        terminal(session.OutStream()),
+        input(kb)
     {
-        kb.Register( [this](auto key){ this->Keypressed(key); } );
+        input.Register( [this](auto key){ this->Keypressed(key); } );
+    }
+    void enable() 
+    {      
+        input.start();
+    }
+    void disable()
+    {
+        input.stop();
     }
 
 private:
@@ -121,7 +130,7 @@ private:
         }
 
     }
-
+    InputDevice& input;
     CliSession& session;
     Terminal terminal;
 };

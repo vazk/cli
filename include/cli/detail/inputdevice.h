@@ -50,7 +50,17 @@ public:
     virtual ~InputDevice() = default;
 
     template <typename H>
-    void Register(H&& h) { handler = std::forward<H>(h); }
+    void Register(H&& h) 
+    { 
+        handler = std::forward<H>(h); 
+    }
+    void UnRegister() 
+    { 
+        handler = nullptr; 
+    }
+
+    virtual void start() {}
+    virtual void stop() {}
 
 protected:
 

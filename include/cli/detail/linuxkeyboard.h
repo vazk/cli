@@ -42,7 +42,7 @@
 #include <sys/time.h>
 
 #include "inputdevice.h"
-
+#include <iostream>
 
 namespace cli
 {
@@ -54,17 +54,28 @@ class LinuxKeyboard : public InputDevice
 public:
     explicit LinuxKeyboard(detail::asio::BoostExecutor ex) :
         InputDevice(ex)
-    {
-        ToManualMode();
-        servant = std::make_unique<std::thread>( [this](){ Read(); } );
-        servant -> detach();
+    {     
+        start();
     }
     ~LinuxKeyboard()
     {
-        run = false;
-        ToStandardMode();
+        stop();
     }
 
+    void start() 
+    {
+        ToManualMode();
+        run = true;
+        done = false;
+        servant = std::make_unique<std::thread>( [this](){ Read(); } );
+        servant -> detach();
+    }
+    void stop() 
+    {
+        run = false;
+        ToStandardMode();
+        while ( !done ) {}
+    }
 private:
 
     void Read()
@@ -74,12 +85,19 @@ private:
             auto k = Get();
             Notify(k);
         }
+        done = true;
     }
 
     std::pair<KeyType,char> Get()
     {
-        while ( !KbHit() ) {}
+        while ( !KbHit() ) { 
+            if(!run) {
+                return std::make_pair(KeyType::ignored,' ');
+            } 
+        }
+        
         int ch = getchar();
+
         switch( ch )
         {
             case EOF:
@@ -123,6 +141,7 @@ private:
         tcgetattr( STDIN_FILENO, &oldt );
         newt = oldt;
         newt.c_lflag &= ~( ICANON | ECHO );
+        newt.c_cc[VMIN] = 1;
         tcsetattr( STDIN_FILENO, TCSANOW, &newt );
     }
     void ToStandardMode()
@@ -135,8 +154,8 @@ private:
       struct timeval tv;
       fd_set rdfs;
 
-      tv.tv_sec = 1;
-      tv.tv_usec = 0;
+      tv.tv_sec = 0;
+      tv.tv_usec = 1000;
 
       FD_ZERO(&rdfs);
       FD_SET (STDIN_FILENO, &rdfs);
@@ -147,7 +166,8 @@ private:
 
     termios oldt;
     termios newt;
-    std::atomic<bool> run{ true };
+    std::atomic<bool> run{ false };
+    std::atomic<bool> done{ false };
     std::unique_ptr<std::thread> servant;
 };
 

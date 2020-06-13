@@ -50,6 +50,23 @@ public:
         Prompt();
     }
 
+    void disable_input() 
+    { 
+        ih.disable(); 
+    }
+    void enable_input() 
+    { 
+        ih.enable(); 
+    }
+    void enable_prompt()
+    {
+        show_prompt = true;
+    }
+    void disable_prompt()
+    {
+        show_prompt = false;
+    }
+
 private:
     detail::Keyboard kb;
     detail::InputHandler ih;
