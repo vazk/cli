@@ -235,9 +235,19 @@ namespace cli
 
         void Prompt();
 
-        void Current(Menu* menu) { current = menu; }
+        Menu* Current() const 
+        { 
+            return current; 
+        } 
+
+        void SetCurrent(Menu* menu) 
+        { 
+            current = menu; 
+        }
 
         std::ostream& OutStream() { return out; }
+
+        bool IsRunningCommand() const { return running_command; }
 
         void Help() const;
 
@@ -277,6 +287,17 @@ namespace cli
         std::ostream& out;
         std::function< void(std::ostream&)> exitAction;
         detail::History history;
+
+    protected:
+        struct RunningCommand { 
+            RunningCommand(bool& rc) : running(rc)
+            { running = true; }
+            ~RunningCommand() 
+            { running = false; }
+            bool& running;
+        };
+        bool show_prompt;
+        bool running_command;
     };
 
     // ********************************************************************
@@ -409,7 +430,7 @@ namespace cli
             {
                 if (cmdLine.size() == 1)
                 {
-                    session.Current(this);
+                    session.SetCurrent(this);
                     return true;
                 }
                 else
@@ -435,6 +456,11 @@ namespace cli
         std::string Prompt() const
         {
             return Name();
+        }
+
+        Menu* Parent() const 
+        {
+            return parent;
         }
 
         void MainHelp(std::ostream& out)
@@ -510,6 +536,8 @@ namespace cli
 
         template <typename F, typename R, typename ... Args>
         CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const);
+        template <typename F, typename R>
+        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>& cmdline) const);
 
         Menu* parent;
         const std::string description;
@@ -860,6 +888,67 @@ namespace cli
     };
 
 
+
+    template <typename F>
+    class ShellLikeFunctionCommand : public Command
+    {
+    public:
+        // disable value semantics
+        ShellLikeFunctionCommand(const ShellLikeFunctionCommand&) = delete;
+        ShellLikeFunctionCommand& operator = (const ShellLikeFunctionCommand&) = delete;
+
+        ShellLikeFunctionCommand(
+            const std::string& _name,
+            F fun,
+            const std::string& desc,
+            const std::vector<std::string>& parDesc
+        )
+            : Command(_name), func(std::move(fun)), description(desc), parameterDesc(parDesc)
+        {
+        }
+
+        bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
+        {
+            if (!IsEnabled()) return false;
+            //const std::size_t paramSize = sizeof...(Args);
+            //if (cmdLine.size() != paramSize+1) return false;
+            if (Name() == cmdLine[0])
+            {
+                try
+                {
+                    func( session.OutStream(), cmdLine ); 
+                    //auto g = [&](auto ...){ func( session.OutStream(), ... ); };
+                    //Select<decltype(g), Args...>::Exec(g, std::next(cmdLine.begin()), cmdLine.end());
+                }
+                catch (boost::bad_lexical_cast &)
+                {
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        void Help(std::ostream& out) const override
+        {
+            if (!IsEnabled()) return;
+            out << " - " << Name();
+            //if (parameterDesc.empty())
+            //    PrintDesc<Args...>::Dump(out);
+            for (auto& s: parameterDesc)
+                out << " <" << s << '>';
+            out << "\n\t" << description << "\n";
+        }
+
+    private:
+
+        const F func;
+        const std::string description;
+        const std::vector<std::string> parameterDesc;
+    };
+
+
+
     // ********************************************************************
 
     // CliSession implementation
@@ -869,7 +958,9 @@ namespace cli
             current(cli.RootMenu()),
             globalScopeMenu(std::make_unique< Menu >()),
             out(_out),
-            history(historySize)
+            history(historySize),
+            show_prompt(true),
+            running_command(false)
         {
             history.LoadCommands(cli.GetCommands());
 
@@ -895,6 +986,7 @@ namespace cli
 
     inline void CliSession::Feed(const std::string& cmd)
     {
+        RunningCommand rcraii(running_command);
         std::vector<std::string> strs;
         detail::split(strs, cmd);
         if (strs.empty()) return; // just hit enter
@@ -915,11 +1007,13 @@ namespace cli
 
     inline void CliSession::Prompt()
     {
-        out << beforePrompt
-            << current->Prompt()
-            << afterPrompt
-            << "> "
-            << std::flush;
+        if(show_prompt) {
+            out << beforePrompt
+                << current->Prompt()
+                << afterPrompt
+                << "> "
+                << std::flush;
+        }
     }
 
     inline void CliSession::Help() const
@@ -988,6 +1082,14 @@ namespace cli
         return cmd;
     }
 
+    template <typename F, typename R>
+    CmdHandler Menu::Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>&) const )
+    {
+        auto c = std::make_shared<ShellLikeFunctionCommand<F>>(name, f, help, parDesc);
+        CmdHandler cmd(c, cmds);
+        cmds->push_back(c);
+        return cmd;
+    }
 } // namespace
 
 #endif
