@@ -31,6 +31,7 @@
 #define CLI_H_
 
 #include <iostream>
+#include <atomic>
 #include <string>
 #include <vector>
 #include <memory>
@@ -238,19 +239,29 @@ namespace cli
 
         void Prompt();
 
-        Menu* Current() const 
+        Menu* CurrentMenu() const 
         { 
-            return current; 
+            return current_menu; 
         } 
 
-        void SetCurrent(Menu* menu) 
+        void SetCurrentMenu(Menu* menu) 
         { 
-            current = menu; 
+            current_menu = menu; 
+        }
+
+        void SetRunningCommand(Command* cmd) 
+        { 
+            running_cmd = cmd; 
+        }
+
+        void CancelRunningCommand()
+        {
+            running_cmd = nullptr;
         }
 
         std::ostream& OutStream() { return out; }
 
-        bool IsRunningCommand() const { return running_command; }
+        Command* RunningCommand() const { return running_cmd; }
 
         void Help() const;
 
@@ -285,22 +296,15 @@ namespace cli
     private:
 
         Cli& cli;
-        Menu* current;
+        Menu* current_menu;
+        std::atomic<Command*> running_cmd;
         std::unique_ptr<Menu> globalScopeMenu;
         std::ostream& out;
         std::function< void(std::ostream&)> exitAction;
         detail::History history;
 
     protected:
-        struct RunningCommand { 
-            RunningCommand(bool& rc) : running(rc)
-            { running = true; }
-            ~RunningCommand() 
-            { running = false; }
-            bool& running;
-        };
         bool show_prompt;
-        bool running_command;
     };
 
     // ********************************************************************
@@ -444,7 +448,7 @@ namespace cli
             {
                 if (cmdLine.size() == 1)
                 {
-                    session.SetCurrent(this);
+                    session.SetCurrentMenu(this);
                     return true;
                 }
                 else
@@ -600,7 +604,7 @@ namespace cli
                     int argc = static_cast<int>(argv_vec.size());
                     char** argv = const_cast<char**>(argv_vec.data());
                     if(func( session.OutStream(), argc, argv)) { 
-                        session.SetCurrent(this);
+                        session.SetCurrentMenu(this);
                     }
                     return true;
 
@@ -616,12 +620,18 @@ namespace cli
 
         void Help(std::ostream& out) const override
         {
-            if (!IsEnabled()) return;
+            /*if (!IsEnabled()) return;
             out << " - " << Name();
             //if (parameterDesc.empty())
             //    PrintDesc<Args...>::Dump(out);
             for (auto& s: parameterDesc)
                 out << " <" << s << '>';
+            out << "\n\t" << description << "\n";*/
+
+            if (!IsEnabled()) return;
+            out << " - " << Name();
+            for (auto& s: parameterDesc)
+                out << "\n\t" << s;
             out << "\n\t" << description << "\n";
         }
 
@@ -944,13 +954,16 @@ namespace cli
             {
                 try
                 {
+                    session.SetRunningCommand(this);
                     auto g = [&](auto ... pars){ func( session.OutStream(), pars... ); };
                     Select<decltype(g), Args...>::Exec(g, std::next(cmdLine.begin()), cmdLine.end());
                 }
                 catch (boost::bad_lexical_cast &)
                 {
+                    session.SetRunningCommand(nullptr);
                     return false;
                 }
+                session.SetRunningCommand(nullptr);
                 return true;
             }
             return false;
@@ -1001,6 +1014,7 @@ namespace cli
             {
                 try
                 {
+                    session.SetRunningCommand(this);
                     std::vector<const char *> argv_vec(cmdLine.size());
                     std::transform(cmdLine.begin(), 
                                    cmdLine.end(), 
@@ -1014,8 +1028,10 @@ namespace cli
                 }
                 catch (boost::bad_lexical_cast &)
                 {
+                    session.SetRunningCommand(nullptr);
                     return false;
                 }
+                session.SetRunningCommand(nullptr);
                 return true;
             }
             return false;
@@ -1028,12 +1044,11 @@ namespace cli
             //if (parameterDesc.empty())
             //    PrintDesc<Args...>::Dump(out);
             for (auto& s: parameterDesc)
-                out << " <" << s << '>';
+                out << "\n\t" << s;
             out << "\n\t" << description << "\n";
         }
 
     private:
-
         const F func;
         const std::string description;
         const std::vector<std::string> parameterDesc;
@@ -1047,12 +1062,12 @@ namespace cli
 
     inline CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
             cli(_cli),
-            current(cli.RootMenu()),
+            current_menu(cli.RootMenu()),
+            running_cmd(nullptr),
             globalScopeMenu(std::make_unique< Menu >()),
             out(_out),
             history(historySize),
-            show_prompt(true),
-            running_command(false)
+            show_prompt(true)
         {
             history.LoadCommands(cli.GetCommands());
 
@@ -1078,7 +1093,6 @@ namespace cli
 
     inline void CliSession::Feed(const std::string& cmd)
     {
-        RunningCommand rcraii(running_command);
         std::vector<std::string> strs;
         detail::split(strs, cmd);
         if (strs.empty()) return; // just hit enter
@@ -1089,7 +1103,7 @@ namespace cli
         bool found = globalScopeMenu->ScanCmds(strs, *this);
 
         // root menu recursive cmds check
-        if (!found) found = current -> ScanCmds(std::move(strs), *this); // last use of strs
+        if (!found) found = current_menu -> ScanCmds(std::move(strs), *this); // last use of strs
 
         if (!found) // error msg if not found
             out << "\'"<<cmd<<"\' is not a metriffic command, use \'help\'" << "\n";
@@ -1101,7 +1115,7 @@ namespace cli
     {
         if(show_prompt) {
             out << beforePrompt
-                << current->Prompt()
+                << current_menu->Prompt()
                 << afterPrompt
                 << "> "
                 << std::flush;
@@ -1112,7 +1126,7 @@ namespace cli
     {
         out << "Commands available:\n";
         globalScopeMenu->MainHelp(out);
-        current -> MainHelp( out );
+        current_menu -> MainHelp( out );
     }
 
     inline std::vector<std::string> CliSession::GetCompletions(std::string currentLine) const
@@ -1120,7 +1134,7 @@ namespace cli
         // trim_left(currentLine);
         currentLine.erase(currentLine.begin(), std::find_if(currentLine.begin(), currentLine.end(), [](int ch) { return !std::isspace(ch); }));
         auto v1 = globalScopeMenu->GetCompletions(currentLine);
-        auto v3 = current->GetCompletions(currentLine);
+        auto v3 = current_menu->GetCompletions(currentLine);
         v1.insert(v1.end(), std::make_move_iterator(v3.begin()), std::make_move_iterator(v3.end()));
 
         // removes duplicates (std::unique requires a sorted container)
