@@ -60,7 +60,10 @@ public:
     {
         input.stop();
     }
-
+    void reset()
+    {
+        terminal.SetLine("");
+    }
 private:
 
     void Keypressed(std::pair<KeyType, char> k)

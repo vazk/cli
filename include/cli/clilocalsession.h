@@ -66,7 +66,10 @@ public:
     {
         show_prompt = false;
     }
-
+    void reset_input() 
+    { 
+        ih.reset(); 
+    }
 private:
     detail::Keyboard kb;
     detail::InputHandler ih;
