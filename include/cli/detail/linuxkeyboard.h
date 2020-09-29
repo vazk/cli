@@ -82,58 +82,61 @@ private:
     {
         while ( run )
         {
-            auto k = Get();
-            Notify(k);
-        }
-        done = true;
-    }
+            bool can_getchar = true;
+            while ( !KbHit() ) { 
+                if(!run) {
+                    Notify(std::make_pair(KeyType::ignored,' '));
+                    can_getchar = false; 
+                    break;
+                } 
+            }
 
-    std::pair<KeyType,char> Get()
-    {
-        while ( !KbHit() ) { 
-            if(!run) {
-                return std::make_pair(KeyType::ignored,' ');
-            } 
-        }
-        
-        int ch = getchar();
-
-        switch( ch )
-        {
-            case EOF:
-            case 4:  // EOT
-                return std::make_pair(KeyType::eof,' ');
-                break;
-            case 127: return std::make_pair(KeyType::backspace,' '); break;
-            case 10: return std::make_pair(KeyType::ret,' '); break;
-            case 27: // symbol
-                ch = getchar();
-                if ( ch == 91 ) // arrow keys
+            while( can_getchar ) {
+                int ch = getchar();
+                switch( ch )
                 {
-                    ch = getchar();
-                    switch( ch )
-                    {
-                        case 51:
+                    case EOF:
+                    case 4:  // EOT
+                        Notify(std::make_pair(KeyType::eof,' '));                        
+                        can_getchar = false;
+                        break;
+                    case 127: 
+                        Notify(std::make_pair(KeyType::backspace,' ')); 
+                        break;
+                    case 10: 
+                        Notify(std::make_pair(KeyType::ret,' ')); 
+                        can_getchar = false; 
+                        break;
+                    case 27: // symbol
+                        ch = getchar();
+                        if ( ch == 91 ) // arrow keys
+                        {
                             ch = getchar();
-                            if ( ch == 126 ) return std::make_pair(KeyType::canc,' ');
-                            else return std::make_pair(KeyType::ignored,' ');
-                            break;
-                        case 65: return std::make_pair(KeyType::up,' ');
-                        case 66: return std::make_pair(KeyType::down,' ');
-                        case 68: return std::make_pair(KeyType::left,' ');
-                        case 67: return std::make_pair(KeyType::right,' ');
-                        case 70: return std::make_pair(KeyType::end,' ');
-                        case 72: return std::make_pair(KeyType::home,' ');
+                            switch( ch )
+                            {
+                                case 51:
+                                    ch = getchar();
+                                    if ( ch == 126 ) Notify(std::make_pair(KeyType::canc,' '));
+                                    else Notify(std::make_pair(KeyType::ignored,' '));
+                                    break;
+                                case 65: Notify(std::make_pair(KeyType::up,' ')); break;
+                                case 66: Notify(std::make_pair(KeyType::down,' ')); break;
+                                case 68: Notify(std::make_pair(KeyType::left,' ')); break;
+                                case 67: Notify(std::make_pair(KeyType::right,' ')); break;
+                                case 70: Notify(std::make_pair(KeyType::end,' ')); break;
+                                case 72: Notify(std::make_pair(KeyType::home,' ')); break;
+                            }
+                        }
+                        break;
+                    default: // ascii
+                    {
+                        const char c = static_cast<char>(ch);
+                        Notify(std::make_pair(KeyType::ascii,c));
                     }
-                }
-                break;
-            default: // ascii
-            {
-                const char c = static_cast<char>(ch);
-                return std::make_pair(KeyType::ascii,c);
+                }                 
             }
         }
-        return std::make_pair(KeyType::ignored,' ');
+        done = true;
     }
 
     void ToManualMode()
